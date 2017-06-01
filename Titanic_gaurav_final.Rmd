@@ -1,0 +1,156 @@
+---
+title: "Gaurav_Titanic_Final"
+output: html_document
+---
+
+```{r include=FALSE}
+library(dygraphs)
+library(dplyr)
+library(data.table)
+library(zoo)
+library(forecast)
+library(ggplot2)
+library(scales)
+library(splines)
+library(sqldf)
+library(reshape2)
+library(pystr)
+library(psych)
+library(plyr)
+library(PerformanceAnalytics)
+library(MASS)
+library(lattice)
+library(gridExtra)
+library(grid)
+library(graphics)
+library(ggplot2)
+library(randomForest)
+library(caret)
+library(rpart.plot)
+library(rpart)
+library(party)
+library(aemo)
+library(datasets)
+library(dplyr)
+library(scales)
+library(tcltk)
+library(lubridate)
+library(forecast)
+library(reshape)
+library(forecast)
+library(reshape)
+library(RColorBrewer)
+library(rpart.plot)
+library(rattle)
+
+```
+
+
+Import the data set i.e train and test
+```{r}
+test <- read.csv("D:/Multivariate/Titanic/test.csv")
+train <- read.csv("D:/Multivariate/Titanic/train.csv")
+#combine the train and test data sets into a single data set 
+test$Survived <- NA
+FullData <- rbind(train, test)
+```
+Now parse the Name feature
+```{r}
+# Convert to a string
+FullData$Name <- as.character(FullData$Name)
+
+#bring out the title from the name
+FullData$Title <- sapply(FullData$Name, FUN=function(x) {strsplit(x, split='[,.]')[[1]][2]})
+FullData$Title <- sub(' ', '', FullData$Title)
+
+table(FullData$Title)
+
+#there are many titles which are rare so replace them with the median of the group title
+FullData$Title[FullData$Title %in% c('Mme', 'Mlle')] <- 'Mlle'
+FullData$Title[FullData$Title %in% c('Capt', 'Don', 'Major', 'Sir')] <- 'Sir'
+FullData$Title[FullData$Title %in% c('Dona', 'Lady', 'the Countess', 'Jonkheer')] <- 'Lady'
+
+table(FullData$Title)
+# Convert title to a factor
+FullData$Title <- factor(FullData$Title)
+
+# Engineered variable: Family size
+FullData$SizeOfFamily <- FullData$SibSp + FullData$Parch + 1
+
+```
+
+Fill NA with the mean of the age
+```{r}
+summary(FullData$Age)
+FullData$Age[which(is.na(FullData$Age))] <- mean(FullData$Age,na.rm = TRUE)
+
+#fill NA with the mean of the Fare
+FullData$Fare <- mean(FullData$Fare, na.rm = TRUE)
+summary(FullData$Embarked)
+which(FullData$Embarked == '')
+FullData$Embarked[c(62,830)] = "S"
+FullData$Embarked <- factor(FullData$Embarked)
+```
+
+Separte train and the test data
+Divide the T_tain data into two parts so that it can be used as the validation data in the prediction
+```{r}
+T_train <- FullData[1:600,]
+T_test <- FullData[892:1309,]
+valid_data <- FullData[600:891,]
+```
+
+Using random forest
+```{r}
+
+randomforest_model <- randomForest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked + Title + SizeOfFamily,
+                      data=T_train, 
+                      importance=TRUE, 
+                      ntree=453)
+#predict validate survival
+rf_predict_valid <- predict(randomforest_model, valid_data)
+confusionMatrix(rf_predict_valid, valid_data$Survived)
+
+rf_predict_test <- predict(randomforest_model, T_test)
+rf_write_test <- data.frame(PassengerId = T_test$PassengerId, Survived = rf_predict_test)
+write.csv(rf_write_test, file = "rf_prediction.csv", row.names = FALSE)
+
+```
+
+Model Condtional Tree Ctree
+```{r}
+ctree_model <- ctree(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked + Title + SizeOfFamily,
+               data = T_train)
+```
+check the accuracy of the model on validate data
+```{r}
+ctree_predict_valid <- predict(ctree_model, valid_data)
+confusionMatrix(ctree_predict_valid, valid_data$Survived)
+```
+predict the Survival of test data
+```{r}
+ctree_predict_test <- predict(ctree_model, T_test)
+write_ctree_test <- data.frame(PassengerId = T_test$PassengerId, Survived = ctree_predict_test)
+write.csv(write_ctree_test, file = "ctree_predict.csv", row.names = FALSE)
+```
+
+
+build model for cforest using T_train
+using cforest tree classification model
+```{r}
+set.seed(415)
+cforest_model <- cforest(as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked + Title + SizeOfFamily,
+               data = T_train, controls=cforest_unbiased(ntree=2400, mtry=3))
+```
+for testing purpose check the accuracy of the model on validate data
+```{r}
+predict_valid <- predict(cforest_model, valid_data, OOB=TRUE, type = "response")
+confusionMatrix(predict_valid, valid_data$Survived)
+```
+
+Now predict the test data and write it in a .csv file
+```{r}
+predict_test <- predict(cforest_model, T_test, OOB=TRUE, type = "response")
+write_cforest_test <- data.frame(PassengerId = T_test$PassengerId, Survived = predict_test)
+write.csv(write_cforest_test, file = "cforest_prediction.csv", row.names = FALSE)
+```
